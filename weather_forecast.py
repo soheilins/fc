@@ -28,8 +28,11 @@ SEND_MESSAGE_URL = f"{BASE_API}/sendMessage"
 def persian(text):
     if not text:
         return text
-    reshaped = arabic_reshaper.reshape(text)
-    return get_display(reshaped)
+    try:
+        reshaped = arabic_reshaper.reshape(text)
+        return get_display(reshaped)
+    except:
+        return text
 
 MONTHS_PERSIAN = {
     1: "ژانویه", 2: "فوریه", 3: "مارس", 4: "آوریل", 5: "مه", 6: "ژوئن",
@@ -62,7 +65,6 @@ def weather_desc_persian(code):
     return code_map.get(code, "متغیر 🌡️")
 
 def safe_float(val, default=0):
-    """Return float value or default if None or invalid."""
     try:
         if val is None:
             return default
@@ -110,7 +112,6 @@ def format_persian_message(forecast):
     if not dates:
         return "⚠️ داده‌ای یافت نشد."
 
-    # Safely extract lists, replacing None with empty lists
     max_t = daily.get("temperature_2m_max", [])
     min_t = daily.get("temperature_2m_min", [])
     feels_max = daily.get("apparent_temperature_max", [])
@@ -132,18 +133,15 @@ def format_persian_message(forecast):
         date_persian = format_persian_date(dates[i])
         msg += persian(f"📅 {date_persian}\n")
 
-        # Temperature (use 0 if missing)
         t_min = safe_float(min_t[i] if i < len(min_t) else None)
         t_max = safe_float(max_t[i] if i < len(max_t) else None)
         msg += persian(f"   🌡️ {t_min:.0f}–{t_max:.0f}°C\n")
 
-        # Feels like
         if i < len(feels_max) and feels_max[i] is not None and feels_min[i] is not None:
             f_min = safe_float(feels_min[i])
             f_max = safe_float(feels_max[i])
             msg += persian(f"   🤔 احساس: {f_min:.0f}–{f_max:.0f}°C\n")
 
-        # Precipitation
         p = safe_float(precip[i] if i < len(precip) else None)
         r = safe_float(rain[i] if i < len(rain) else None)
         s = safe_float(snow[i] if i < len(snow) else None)
@@ -154,21 +152,17 @@ def format_persian_message(forecast):
             precip_line += persian(f" ❄️ برف {s:.1f} cm")
         msg += precip_line + "\n"
 
-        # Wind
         w = safe_float(wind[i] if i < len(wind) else None)
         if w > 0:
             msg += persian(f"   💨 باد: تا {w:.0f} km/h\n")
 
-        # UV index
         u = safe_float(uv[i] if i < len(uv) else None)
         if u > 0:
             msg += persian(f"   ☀️ UV: {u:.1f}\n")
 
-        # Weather description
         code = safe_int(codes[i] if i < len(codes) else None)
         msg += persian(f"   {weather_desc_persian(code)}\n")
 
-        # Sunrise/Sunset
         if i < len(sunrise) and sunrise[i] and i < len(sunset) and sunset[i]:
             sr = sunrise[i].split("T")[1][:5] if "T" in sunrise[i] else sunrise[i]
             ss = sunset[i].split("T")[1][:5] if "T" in sunset[i] else sunset[i]
@@ -181,21 +175,44 @@ def format_persian_message(forecast):
     return msg
 
 def send_rubika_message(chat_id, text):
+    # Rubika message limit is 4096 characters. If longer, split.
+    max_len = 4000  # safe margin
+    if len(text) > max_len:
+        # Split into multiple messages
+        parts = [text[i:i+max_len] for i in range(0, len(text), max_len)]
+        for idx, part in enumerate(parts):
+            payload = {"chat_id": chat_id, "text": part}
+            try:
+                resp = requests.post(SEND_MESSAGE_URL, json=payload, timeout=10)
+                print(f"Part {idx+1} response: {resp.status_code} - {resp.text[:200]}", flush=True)
+                if resp.status_code != 200:
+                    print(f"⚠️ Failed to send part {idx+1} to {chat_id}", flush=True)
+            except Exception as e:
+                print(f"❌ Exception sending part {idx+1}: {e}", flush=True)
+        return
+
+    # Normal send
     payload = {"chat_id": chat_id, "text": text}
     try:
         resp = requests.post(SEND_MESSAGE_URL, json=payload, timeout=10)
+        print(f"Response status: {resp.status_code}", flush=True)
+        print(f"Response body: {resp.text[:300]}", flush=True)
         if resp.status_code == 200:
-            print(f"✅ Sent to {chat_id}", flush=True)
+            data = resp.json()
+            if data.get("status") == "OK":
+                print(f"✅ Sent to {chat_id}", flush=True)
+            else:
+                print(f"❌ Rubika error: {data}", flush=True)
         else:
-            print(f"⚠️ Failed to {chat_id}: {resp.text[:100]}", flush=True)
+            print(f"❌ HTTP error {resp.status_code}: {resp.text}", flush=True)
     except Exception as e:
         print(f"❌ Exception to {chat_id}: {e}", flush=True)
 
 def main():
     print("🌤️ Weather bot started (16 days, 6h run, hourly send)", flush=True)
     start_time = time.time()
-    max_runtime = 5.9 * 3600   # 5.9 hours
-    interval = 3600            # 1 hour
+    max_runtime = 5.9 * 3600
+    interval = 3600
 
     iteration = 0
     while time.time() - start_time < max_runtime:
@@ -205,6 +222,9 @@ def main():
         forecast = fetch_forecast()
         if forecast:
             message = format_persian_message(forecast)
+            print(f"Message length: {len(message)} characters", flush=True)
+            # Print first 200 chars to see if it's empty/garbled
+            print(f"Message preview: {message[:200]}", flush=True)
             for uid in RUBIKA_USER_IDS:
                 send_rubika_message(uid, message)
         else:
