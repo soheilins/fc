@@ -52,17 +52,17 @@ def format_persian_date(date_str):
 
 def weather_desc_persian(code):
     if code is None:
-        return "متغیر 🌡️"
+        return "متغیر"
     code_map = {
-        0: "صاف ☀️", 1: "کمی ابر ⛅", 2: "نیمه ابری ☁️", 3: "ابری 🌥️",
-        45: "مه آلود 🌫️", 48: "مه یخ‌زده 🌫️",
-        51: "بارون خفیف 🌧️", 53: "بارون متوسط 🌧️", 55: "بارون شدید 🌧️",
-        61: "باران خفیف 🌦️", 63: "باران متوسط 🌧️", 65: "باران شدید 🌧️",
-        71: "برف خفیف ❄️", 73: "برف متوسط ❄️", 75: "برف شدید ❄️",
-        80: "رگبار خفیف 🌦️", 81: "رگبار متوسط 🌦️", 82: "رگبار شدید ⛈️",
-        95: "طوفان رعد و برق ⛈️", 96: "طوفان با تگرگ ⛈️", 99: "طوفان شدید با تگرگ ⛈️"
+        0: "صاف", 1: "کمی ابر", 2: "نیمه ابری", 3: "ابری",
+        45: "مه آلود", 48: "مه یخ‌زده",
+        51: "بارون خفیف", 53: "بارون متوسط", 55: "بارون شدید",
+        61: "باران خفیف", 63: "باران متوسط", 65: "باران شدید",
+        71: "برف خفیف", 73: "برف متوسط", 75: "برف شدید",
+        80: "رگبار خفیف", 81: "رگبار متوسط", 82: "رگبار شدید",
+        95: "طوفان رعد و برق", 96: "طوفان با تگرگ", 99: "طوفان شدید با تگرگ"
     }
-    return code_map.get(code, "متغیر 🌡️")
+    return code_map.get(code, "متغیر")
 
 def safe_float(val, default=0):
     try:
@@ -103,7 +103,8 @@ def fetch_forecast():
         print(f"❌ Forecast error: {e}", flush=True)
         return None
 
-def format_persian_message(forecast):
+def format_compact_message(forecast):
+    """Compact format: 2 lines per day, well under 128 lines."""
     if not forecast or "daily" not in forecast:
         return "⚠️ اطلاعات آب و هوا در دسترس نیست."
 
@@ -125,78 +126,64 @@ def format_persian_message(forecast):
     sunrise = daily.get("sunrise", [])
     sunset = daily.get("sunset", [])
 
-    msg = persian(f"📌 **پیش‌بینی {len(dates)} روزه هوای ساری**\n")
+    msg = persian("📌 **پیش‌بینی ۱۶ روزه هوای ساری**\n")
     msg += persian(f"🕒 بروزرسانی: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     msg += "─" * 30 + "\n"
 
     for i in range(len(dates)):
         date_persian = format_persian_date(dates[i])
-        msg += persian(f"📅 {date_persian}\n")
-
         t_min = safe_float(min_t[i] if i < len(min_t) else None)
         t_max = safe_float(max_t[i] if i < len(max_t) else None)
-        msg += persian(f"   🌡️ {t_min:.0f}–{t_max:.0f}°C\n")
-
-        if i < len(feels_max) and feels_max[i] is not None and feels_min[i] is not None:
-            f_min = safe_float(feels_min[i])
-            f_max = safe_float(feels_max[i])
-            msg += persian(f"   🤔 احساس: {f_min:.0f}–{f_max:.0f}°C\n")
-
+        f_min = safe_float(feels_min[i] if i < len(feels_min) else None)
+        f_max = safe_float(feels_max[i] if i < len(feels_max) else None)
         p = safe_float(precip[i] if i < len(precip) else None)
         r = safe_float(rain[i] if i < len(rain) else None)
         s = safe_float(snow[i] if i < len(snow) else None)
-        precip_line = persian(f"   🌧️ بارش: {p:.1f} mm")
-        if r > 0:
-            precip_line += persian(f" (باران {r:.1f} mm)")
-        if s > 0:
-            precip_line += persian(f" ❄️ برف {s:.1f} cm")
-        msg += precip_line + "\n"
-
         w = safe_float(wind[i] if i < len(wind) else None)
-        if w > 0:
-            msg += persian(f"   💨 باد: تا {w:.0f} km/h\n")
-
         u = safe_float(uv[i] if i < len(uv) else None)
-        if u > 0:
-            msg += persian(f"   ☀️ UV: {u:.1f}\n")
-
         code = safe_int(codes[i] if i < len(codes) else None)
-        msg += persian(f"   {weather_desc_persian(code)}\n")
 
+        # Line 1: Date and temperatures
+        line1 = f"📅 {date_persian}  |  🌡️ {t_min:.0f}–{t_max:.0f}°C"
+        if f_max > 0 or f_min > 0:
+            line1 += f"  (احساس {f_min:.0f}–{f_max:.0f}°C)"
+        msg += persian(line1) + "\n"
+
+        # Line 2: Weather, rain, wind, UV
+        # Build details string
+        details = []
+        if p > 0:
+            details.append(f"🌧️ {p:.1f}mm")
+            if r > 0:
+                details[-1] += f" (باران {r:.1f})"
+            if s > 0:
+                details[-1] += f" ❄️{s:.1f}"
+        if w > 0:
+            details.append(f"💨 {w:.0f}km/h")
+        if u > 0:
+            details.append(f"☀️ UV {u:.1f}")
+        desc = weather_desc_persian(code)
+        line2 = f"   {desc}"
+        if details:
+            line2 += "  |  " + "  |  ".join(details)
+        msg += persian(line2) + "\n"
+
+        # Sunrise/sunset optional line (only if available)
         if i < len(sunrise) and sunrise[i] and i < len(sunset) and sunset[i]:
             sr = sunrise[i].split("T")[1][:5] if "T" in sunrise[i] else sunrise[i]
             ss = sunset[i].split("T")[1][:5] if "T" in sunset[i] else sunset[i]
             msg += persian(f"   🌅 طلوع {sr}  |  غروب {ss}\n")
 
-        msg += "\n"
+        msg += "\n"   # blank line between days
 
     msg += "─" * 30 + "\n"
     msg += persian("🌐 داده‌ها: Open‑Meteo")
     return msg
 
 def send_rubika_message(chat_id, text):
-    # Rubika message limit is 4096 characters. If longer, split.
-    max_len = 4000  # safe margin
-    if len(text) > max_len:
-        # Split into multiple messages
-        parts = [text[i:i+max_len] for i in range(0, len(text), max_len)]
-        for idx, part in enumerate(parts):
-            payload = {"chat_id": chat_id, "text": part}
-            try:
-                resp = requests.post(SEND_MESSAGE_URL, json=payload, timeout=10)
-                print(f"Part {idx+1} response: {resp.status_code} - {resp.text[:200]}", flush=True)
-                if resp.status_code != 200:
-                    print(f"⚠️ Failed to send part {idx+1} to {chat_id}", flush=True)
-            except Exception as e:
-                print(f"❌ Exception sending part {idx+1}: {e}", flush=True)
-        return
-
-    # Normal send
     payload = {"chat_id": chat_id, "text": text}
     try:
         resp = requests.post(SEND_MESSAGE_URL, json=payload, timeout=10)
-        print(f"Response status: {resp.status_code}", flush=True)
-        print(f"Response body: {resp.text[:300]}", flush=True)
         if resp.status_code == 200:
             data = resp.json()
             if data.get("status") == "OK":
@@ -204,12 +191,12 @@ def send_rubika_message(chat_id, text):
             else:
                 print(f"❌ Rubika error: {data}", flush=True)
         else:
-            print(f"❌ HTTP error {resp.status_code}: {resp.text}", flush=True)
+            print(f"❌ HTTP error {resp.status_code}: {resp.text[:200]}", flush=True)
     except Exception as e:
-        print(f"❌ Exception to {chat_id}: {e}", flush=True)
+        print(f"❌ Exception: {e}", flush=True)
 
 def main():
-    print("🌤️ Weather bot started (16 days, 6h run, hourly send)", flush=True)
+    print("🌤️ Weather bot (compact format)", flush=True)
     start_time = time.time()
     max_runtime = 5.9 * 3600
     interval = 3600
@@ -221,25 +208,22 @@ def main():
 
         forecast = fetch_forecast()
         if forecast:
-            message = format_persian_message(forecast)
-            print(f"Message length: {len(message)} characters", flush=True)
-            # Print first 200 chars to see if it's empty/garbled
-            print(f"Message preview: {message[:200]}", flush=True)
+            message = format_compact_message(forecast)
+            print(f"Message length: {len(message)} chars, lines: {message.count(chr(10))}", flush=True)
             for uid in RUBIKA_USER_IDS:
                 send_rubika_message(uid, message)
         else:
-            error_msg = persian("⚠️ پیش‌بینی در دسترس نیست – بعداً تلاش کنید.")
+            error_msg = persian("⚠️ پیش‌بینی در دسترس نیست")
             for uid in RUBIKA_USER_IDS:
                 send_rubika_message(uid, error_msg)
 
         elapsed = time.time() - start_time
         if elapsed + interval > max_runtime:
-            print("⏰ Runtime limit reached, exiting.", flush=True)
             break
         print(f"⏳ Sleeping {interval} seconds...", flush=True)
         time.sleep(interval)
 
-    print("🏁 6‑hour run completed.", flush=True)
+    print("🏁 Run completed.", flush=True)
 
 if __name__ == "__main__":
     main()
