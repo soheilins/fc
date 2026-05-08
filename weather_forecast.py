@@ -11,28 +11,30 @@ if not RUBIKA_TOKEN:
     print("❌ RUBIKA_TOKEN environment variable not set", flush=True)
     sys.exit(1)
 
-# ========== MULTIPLE RECIPIENTS (OPTION 2: HARDCODED) ==========
+# ========== HARDCODED RECIPIENTS ==========
+# Add as many Rubika user IDs as you want
 RUBIKA_USER_IDS = [
-    "b0JWE2R0bQW0eae5690fa217ebebf122",   # your Rubika user ID
-    # Add more user IDs below, one per line, comma after each except last
+    "b0JWE2R0cCz01c6f676803e07bf4e745",   # first user
+    # Add more below, e.g.:
     # "another_user_id_here",
-    # "third_user_id_here",
 ]
 
 if not RUBIKA_USER_IDS:
-    print("❌ No Rubika user IDs defined in the script", flush=True)
+    print("❌ No user IDs defined", flush=True)
     sys.exit(1)
 
 # Coordinates for Sari, Iran
 LAT = 36.5633
 LON = 53.0601
 
-# Rubika API endpoints
+# Rubika API endpoint for sending text messages
 BASE_API = f"https://botapi.rubika.ir/v3/{RUBIKA_TOKEN}"
 SEND_MESSAGE_URL = f"{BASE_API}/sendMessage"
 
-def fetch_10day_forecast():
-    """Fetch 10‑day weather forecast from Open‑Meteo."""
+# ------------------------------------------------------------
+
+def fetch_forecast():
+    """Fetch 10-day forecast from Open-Meteo (free, no API key)."""
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": LAT,
@@ -49,88 +51,92 @@ def fetch_10day_forecast():
     try:
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()
-        data = resp.json()
-        return data
+        return resp.json()
     except Exception as e:
-        print(f"❌ Failed to fetch forecast: {e}", flush=True)
+        print(f"❌ Forecast error: {e}", flush=True)
         return None
 
-def format_forecast_message(forecast_data):
-    """Convert Open‑Meteo JSON into a nice Persian/English text."""
-    if not forecast_data or "daily" not in forecast_data:
-        return "⚠️ Could not retrieve weather data."
+def weather_symbol(code):
+    """Convert WMO weather code to a simple emoji + description."""
+    if code == 0:
+        return "☀️ Clear"
+    elif code in (1, 2, 3):
+        return "⛅ Partly cloudy"
+    elif code in (45, 48):
+        return "🌫️ Fog"
+    elif code in (51, 53, 55):
+        return "🌧️ Drizzle"
+    elif code in (61, 63, 65):
+        return "🌧️ Rain"
+    elif code in (71, 73, 75):
+        return "❄️ Snow"
+    elif code in (80, 81, 82):
+        return "🌧️ Showers"
+    else:
+        return "🌡️ Mixed"
 
-    daily = forecast_data["daily"]
+def format_message(forecast):
+    """Build a clean, readable forecast message."""
+    if not forecast or "daily" not in forecast:
+        return "⚠️ Could not retrieve weather data for Sari."
+
+    daily = forecast["daily"]
     dates = daily["time"]
-    max_temps = daily["temperature_2m_max"]
-    min_temps = daily["temperature_2m_min"]
-    precip = daily["precipitation_sum"]
-    weather_codes = daily["weathercode"]
+    max_t = daily["temperature_2m_max"]
+    min_t = daily["temperature_2m_min"]
+    rain = daily["precipitation_sum"]
+    codes = daily["weathercode"]
 
-    # Simple weather code description (WMO standard)
-    def weather_desc(code):
-        if code == 0:
-            return "☀️ Clear sky"
-        elif code in [1, 2, 3]:
-            return "⛅ Partly cloudy"
-        elif code in [45, 48]:
-            return "🌫️ Fog"
-        elif code in [51, 53, 55]:
-            return "🌧️ Light drizzle"
-        elif code in [61, 63, 65]:
-            return "🌧️ Rain"
-        elif code in [71, 73, 75]:
-            return "❄️ Snow"
-        elif code in [80, 81, 82]:
-            return "🌧️ Rain showers"
-        else:
-            return "🌡️ Varied"
-
-    message = f"📍 **10‑Day Weather Forecast for Sari, Iran**\n"
-    message += f"🕒 Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-    message += "─" * 30 + "\n"
+    msg = f"📍 **10‑Day Forecast – Sari, Iran**\n"
+    msg += f"🕒 Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+    msg += "─────────────────\n"
 
     for i in range(len(dates)):
         date = dates[i]
-        max_t = max_temps[i]
-        min_t = min_temps[i]
-        rain = precip[i]
-        wcode = weather_codes[i]
-        desc = weather_desc(wcode)
+        t_min = min_t[i]
+        t_max = max_t[i]
+        prec = rain[i]
+        symbol = weather_symbol(codes[i])
 
-        message += f"📅 {date}\n"
-        message += f"   🌡️ {min_t:.0f}°C – {max_t:.0f}°C\n"
-        message += f"   💧 Rain: {rain:.1f} mm\n"
-        message += f"   {desc}\n\n"
+        msg += f"📅 {date}\n"
+        msg += f"   🌡️ {t_min:.0f}° – {t_max:.0f}°C\n"
+        msg += f"   💧 Rain: {prec:.1f} mm\n"
+        msg += f"   {symbol}\n\n"
 
-    message += "─" * 30 + "\n"
-    message += "🌐 Source: Open‑Meteo (free weather API)"
-    return message
+    msg += "─────────────────\n"
+    msg += "🌐 Source: Open‑Meteo"
+    return msg
 
-def send_rubika_message(chat_id, text):
-    """Send a text message via Rubika bot to a single user."""
-    payload = {"chat_id": chat_id, "text": text}
+def send_to_rubika(chat_id, text):
+    """Send a text message to a single Rubika user."""
+    payload = {
+        "chat_id": chat_id,
+        "text": text
+    }
     try:
         resp = requests.post(SEND_MESSAGE_URL, json=payload, timeout=10)
         if resp.status_code == 200:
-            print(f"✅ Forecast sent to user {chat_id}", flush=True)
+            data = resp.json()
+            if data.get("status") == "OK":
+                print(f"✅ Sent to {chat_id}", flush=True)
+            else:
+                print(f"⚠️ API error for {chat_id}: {data}", flush=True)
         else:
-            print(f"⚠️ Failed to send to {chat_id}: {resp.status_code} - {resp.text}", flush=True)
+            print(f"❌ HTTP {resp.status_code} for {chat_id}", flush=True)
     except Exception as e:
-        print(f"❌ Exception sending to {chat_id}: {e}", flush=True)
+        print(f"❌ Exception for {chat_id}: {e}", flush=True)
 
 def main():
-    print("🌤️ Starting weather bot for Sari...", flush=True)
-    forecast = fetch_10day_forecast()
+    print("🌤️ Weather bot started", flush=True)
+    forecast = fetch_forecast()
     if forecast:
-        msg = format_forecast_message(forecast)
-        # Send to every user in the hardcoded list
-        for user_id in RUBIKA_USER_IDS:
-            send_rubika_message(user_id, msg)
+        message = format_message(forecast)
+        for uid in RUBIKA_USER_IDS:
+            send_to_rubika(uid, message)
     else:
-        error_msg = "❌ Weather forecast unavailable at the moment."
-        for user_id in RUBIKA_USER_IDS:
-            send_rubika_message(user_id, error_msg)
+        error_msg = "❌ Weather forecast unavailable right now."
+        for uid in RUBIKA_USER_IDS:
+            send_to_rubika(uid, error_msg)
 
 if __name__ == "__main__":
     main()
