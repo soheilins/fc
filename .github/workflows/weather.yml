@@ -1,28 +1,23 @@
-name: Sari Weather Bot
+name: Weather Bot (16 days, 6h run, hourly send)
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 * * * *'       # every hour at minute 0
+    - cron: '0 */6 * * *'      # every 6 hours
 
 jobs:
   send-weather:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 360
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
       - name: Install dependencies
-        run: pip install requests
-
-      - name: Run weather forecast script
+        run: pip install requests arabic-reshaper python-bidi
+      - name: Run weather bot
         env:
           RUBIKA_TOKEN: ${{ secrets.RUBIKA_TOKEN }}
         run: python weather_forecast.py
