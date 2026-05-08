@@ -14,6 +14,7 @@ if not RUBIKA_TOKEN:
 
 RUBIKA_USER_IDS = [
     "b0JWE2R0cCz01c6f676803e07bf4e745",
+    "b0BZaDD0cCz0546b41e14d71ff9ccf0b",
 ]
 
 # New coordinates (specific location)
