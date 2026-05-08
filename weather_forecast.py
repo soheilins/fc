@@ -24,26 +24,20 @@ FORECAST_DAYS = 16
 BASE_API = f"https://botapi.rubika.ir/v3/{RUBIKA_TOKEN}"
 SEND_MESSAGE_URL = f"{BASE_API}/sendMessage"
 
-# ========== Persian text with correct RTL ==========
-def persian_rtl(text):
-    """
-    Apply Arabic reshaping and bidi to a mixed Persian/English string.
-    Returns string that should display correctly in Rubika.
-    """
+# ========== Persian text shaping (exactly like the PDF bot) ==========
+def reshape_persian(text):
+    """Reshape and apply bidi – same as used in your PDF generator."""
     if not text:
         return text
-    # Reshape the entire string
-    reshaped = arabic_reshaper.reshape(text)
-    # Apply bidirectional algorithm
-    bidi_text = get_display(reshaped)
-    # Wrap with RTL embedding and pop (force RTL direction)
-    return "\u202B" + bidi_text + "\u202C"
+    try:
+        reshaped = arabic_reshaper.reshape(text)
+        bidi_text = get_display(reshaped)
+        # Force visual order (prevent client re‑bidi) by wrapping with LTR embed
+        return "\u202A" + bidi_text + "\u202C"
+    except:
+        return text
 
-def format_number(num):
-    """Convert number to Persian digits."""
-    persian_digits = {'0':'۰','1':'۱','2':'۲','3':'۳','4':'۴','5':'۵','6':'۶','7':'۷','8':'۸','9':'۹'}
-    return ''.join(persian_digits.get(ch, ch) for ch in str(int(num)))
-
+# Month names in Persian
 MONTHS_PERSIAN = {
     1: "ژانویه", 2: "فوریه", 3: "مارس", 4: "آوریل", 5: "مه", 6: "ژوئن",
     7: "ژوئیه", 8: "اوت", 9: "سپتامبر", 10: "اکتبر", 11: "نوامبر", 12: "دسامبر"
@@ -52,8 +46,10 @@ MONTHS_PERSIAN = {
 def format_persian_date(date_str):
     try:
         dt = datetime.strptime(date_str, "%Y-%m-%d")
-        day = format_number(dt.day)
-        year = format_number(dt.year)
+        # Convert digits to Persian
+        persian_digits = {'0':'۰','1':'۱','2':'۲','3':'۳','4':'۴','5':'۵','6':'۶','7':'۷','8':'۸','9':'۹'}
+        day = ''.join(persian_digits.get(ch, ch) for ch in str(dt.day))
+        year = ''.join(persian_digits.get(ch, ch) for ch in str(dt.year))
         month_name = MONTHS_PERSIAN[dt.month]
         return f"{day} {month_name} {year}"
     except:
@@ -61,7 +57,7 @@ def format_persian_date(date_str):
 
 def weather_desc_persian(code):
     if code is None:
-        return ""
+        return "متغیر"
     code_map = {
         0: "صاف", 1: "کمی ابر", 2: "نیمه ابری", 3: "ابری",
         45: "مه آلود", 48: "مه یخ‌زده",
@@ -71,7 +67,7 @@ def weather_desc_persian(code):
         80: "رگبار خفیف", 81: "رگبار متوسط", 82: "رگبار شدید",
         95: "طوفان رعد و برق", 96: "طوفان با تگرگ", 99: "طوفان شدید با تگرگ"
     }
-    return code_map.get(code, "")
+    return code_map.get(code, "متغیر")
 
 def safe_float(val, default=0):
     try:
@@ -104,17 +100,16 @@ def fetch_forecast():
         print(f"❌ Forecast error: {e}", flush=True)
         return None
 
-def build_forecast_message(forecast):
-    """Build message as a list of RTL-ready lines."""
+def build_message(forecast):
+    """Create the forecast text (raw Persian) – no reshaping yet."""
     if not forecast or "daily" not in forecast:
-        return ["⚠️ اطلاعات آب و هوا در دسترس نیست."]
+        return "⚠️ اطلاعات آب و هوا در دسترس نیست."
 
     daily = forecast["daily"]
     dates = daily.get("time", [])
     if not dates:
-        return ["⚠️ داده‌ای یافت نشد."]
+        return "⚠️ داده‌ای یافت نشد."
 
-    # Extract arrays
     max_t = daily.get("temperature_2m_max", [])
     min_t = daily.get("temperature_2m_min", [])
     feels_max = daily.get("apparent_temperature_max", [])
@@ -129,7 +124,7 @@ def build_forecast_message(forecast):
     sunset = daily.get("sunset", [])
 
     lines = []
-    lines.append("📌 پیش‌بینی ۱۶ روزه هوای ساری")
+    lines.append(f"📌 پیش‌بینی {FORECAST_DAYS} روزه هوای ساری")
     lines.append(f"🕒 بروزرسانی: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append("─" * 30)
 
@@ -144,55 +139,46 @@ def build_forecast_message(forecast):
         s = safe_float(snow[i] if i < len(snow) else None)
         w = safe_float(wind[i] if i < len(wind) else None)
         u = safe_float(uv[i] if i < len(uv) else None)
-        code = safe_float(codes[i] if i < len(codes) else 0)
+        code = int(safe_float(codes[i] if i < len(codes) else None))
 
-        # Line 1: Date and temperatures (numbers are okay)
-        temp_line = f"📅 {date_persian}  |  🌡️ {t_min:.0f}–{t_max:.0f}°C"
+        line1 = f"📅 {date_persian}  |  🌡️ {t_min:.0f}–{t_max:.0f}°C"
         if f_max > 0 or f_min > 0:
-            temp_line += f"  (احساس {f_min:.0f}–{f_max:.0f}°C)"
-        lines.append(temp_line)
+            line1 += f"  (احساس {f_min:.0f}–{f_max:.0f}°C)"
+        lines.append(line1)
 
-        # Build details in Persian order (typical Persian right‑to‑left)
         details = []
         if p > 0:
-            detail = f"🌧️ {p:.1f} میلی‌متر"
+            det = f"🌧️ {p:.1f} میلی‌متر"
             if r > 0:
-                detail += f" (باران {r:.1f})"
+                det += f" (باران {r:.1f})"
             if s > 0:
-                detail += f" ❄️ برف {s:.1f}"
-            details.append(detail)
+                det += f" ❄️ برف {s:.1f}"
+            details.append(det)
         if w > 0:
             details.append(f"💨 باد {w:.0f} کیلومتر بر ساعت")
         if u > 0:
             details.append(f"☀️ فرابنفش {u:.1f}")
-        desc = weather_desc_persian(int(code))
+        desc = weather_desc_persian(code)
         line2 = f"   {desc}"
         if details:
-            line2 += "  •  " + "  •  ".join(details)
+            line2 += "  |  " + "  |  ".join(details)
         lines.append(line2)
 
-        # Sunrise/sunset
         if i < len(sunrise) and sunrise[i] and i < len(sunset) and sunset[i]:
             sr = sunrise[i].split("T")[1][:5] if "T" in sunrise[i] else sunrise[i]
             ss = sunset[i].split("T")[1][:5] if "T" in sunset[i] else sunset[i]
             lines.append(f"   🌅 طلوع {sr}  |  غروب {ss}")
 
-        lines.append("")  # blank line
+        lines.append("")  # empty line between days
 
     lines.append("─" * 30)
     lines.append("🌐 داده‌ها: Open‑Meteo")
 
-    # Apply RTL to each line individually, then join
-    rtl_lines = [persian_rtl(line) for line in lines]
-    return rtl_lines
+    return "\n".join(lines)
 
-def send_rubika_message(chat_id, text_lines):
-    """Send the message as a single string joined by newlines."""
-    full_text = "\n".join(text_lines)
-    # Trim to under 4096 characters (safe)
-    if len(full_text) > 4000:
-        full_text = full_text[:4000] + "..."
-    payload = {"chat_id": chat_id, "text": full_text}
+def send_rubika_message(chat_id, text):
+    """Send the (already reshaped) message to Rubika."""
+    payload = {"chat_id": chat_id, "text": text}
     try:
         resp = requests.post(SEND_MESSAGE_URL, json=payload, timeout=10)
         if resp.status_code == 200:
@@ -207,7 +193,7 @@ def send_rubika_message(chat_id, text_lines):
         print(f"❌ Exception: {e}", flush=True)
 
 def main():
-    print("🌤️ Weather bot (RTL‑fixed)", flush=True)
+    print("🌤️ Weather bot (Persian text, LTR‑embedded)", flush=True)
     start_time = time.time()
     max_runtime = 5.9 * 3600
     interval = 3600
@@ -219,13 +205,14 @@ def main():
 
         forecast = fetch_forecast()
         if forecast:
-            message_lines = build_forecast_message(forecast)
+            raw_message = build_message(forecast)
+            reshaped_message = reshape_persian(raw_message)   # apply the same pipeline as PDF
             for uid in RUBIKA_USER_IDS:
-                send_rubika_message(uid, message_lines)
+                send_rubika_message(uid, reshaped_message)
         else:
-            error_lines = [persian_rtl("⚠️ پیش‌بینی در دسترس نیست")]
+            error_msg = reshape_persian("⚠️ پیش‌بینی در دسترس نیست")
             for uid in RUBIKA_USER_IDS:
-                send_rubika_message(uid, error_lines)
+                send_rubika_message(uid, error_msg)
 
         elapsed = time.time() - start_time
         if elapsed + interval > max_runtime:
