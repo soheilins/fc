@@ -13,12 +13,10 @@ if not RUBIKA_TOKEN:
     print("❌ RUBIKA_TOKEN missing", flush=True)
     sys.exit(1)
 
-# Your Rubika user ID
 RUBIKA_USER_IDS = [
     "b0JWE2R0cCz01c6f676803e07bf4e745",
 ]
 
-# Sari, Iran coordinates
 LAT = 36.5633
 LON = 53.0601
 FORECAST_DAYS = 16
@@ -50,6 +48,8 @@ def format_persian_date(date_str):
         return date_str
 
 def weather_desc_persian(code):
+    if code is None:
+        return "متغیر 🌡️"
     code_map = {
         0: "صاف ☀️", 1: "کمی ابر ⛅", 2: "نیمه ابری ☁️", 3: "ابری 🌥️",
         45: "مه آلود 🌫️", 48: "مه یخ‌زده 🌫️",
@@ -60,6 +60,23 @@ def weather_desc_persian(code):
         95: "طوفان رعد و برق ⛈️", 96: "طوفان با تگرگ ⛈️", 99: "طوفان شدید با تگرگ ⛈️"
     }
     return code_map.get(code, "متغیر 🌡️")
+
+def safe_float(val, default=0):
+    """Return float value or default if None or invalid."""
+    try:
+        if val is None:
+            return default
+        return float(val)
+    except:
+        return default
+
+def safe_int(val, default=0):
+    try:
+        if val is None:
+            return default
+        return int(val)
+    except:
+        return default
 
 def fetch_forecast():
     url = "https://api.open-meteo.com/v1/forecast"
@@ -89,19 +106,23 @@ def format_persian_message(forecast):
         return "⚠️ اطلاعات آب و هوا در دسترس نیست."
 
     daily = forecast["daily"]
-    dates = daily["time"]
-    max_t = daily["temperature_2m_max"]
-    min_t = daily["temperature_2m_min"]
-    feels_max = daily.get("apparent_temperature_max", [None]*len(dates))
-    feels_min = daily.get("apparent_temperature_min", [None]*len(dates))
-    precip = daily["precipitation_sum"]
-    rain = daily.get("rain_sum", [0]*len(dates))
-    snow = daily.get("snowfall_sum", [0]*len(dates))
-    wind = daily.get("windspeed_10m_max", [0]*len(dates))
-    uv = daily.get("uv_index_max", [0]*len(dates))
-    codes = daily.get("weathercode", [0]*len(dates))
-    sunrise = daily.get("sunrise", [""]*len(dates))
-    sunset = daily.get("sunset", [""]*len(dates))
+    dates = daily.get("time", [])
+    if not dates:
+        return "⚠️ داده‌ای یافت نشد."
+
+    # Safely extract lists, replacing None with empty lists
+    max_t = daily.get("temperature_2m_max", [])
+    min_t = daily.get("temperature_2m_min", [])
+    feels_max = daily.get("apparent_temperature_max", [])
+    feels_min = daily.get("apparent_temperature_min", [])
+    precip = daily.get("precipitation_sum", [])
+    rain = daily.get("rain_sum", [])
+    snow = daily.get("snowfall_sum", [])
+    wind = daily.get("windspeed_10m_max", [])
+    uv = daily.get("uv_index_max", [])
+    codes = daily.get("weathercode", [])
+    sunrise = daily.get("sunrise", [])
+    sunset = daily.get("sunset", [])
 
     msg = persian(f"📌 **پیش‌بینی {len(dates)} روزه هوای ساری**\n")
     msg += persian(f"🕒 بروزرسانی: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -110,24 +131,49 @@ def format_persian_message(forecast):
     for i in range(len(dates)):
         date_persian = format_persian_date(dates[i])
         msg += persian(f"📅 {date_persian}\n")
-        msg += persian(f"   🌡️ {min_t[i]:.0f}–{max_t[i]:.0f}°C\n")
-        if feels_max[i] is not None:
-            msg += persian(f"   🤔 احساس: {feels_min[i]:.0f}–{feels_max[i]:.0f}°C\n")
-        msg += persian(f"   🌧️ بارش: {precip[i]:.1f} mm")
-        if rain[i] > 0:
-            msg += persian(f" (باران {rain[i]:.1f} mm)")
-        if snow[i] > 0:
-            msg += persian(f" ❄️ برف {snow[i]:.1f} cm")
-        msg += "\n"
-        if wind[i] > 0:
-            msg += persian(f"   💨 باد: تا {wind[i]:.0f} km/h\n")
-        if uv[i] > 0:
-            msg += persian(f"   ☀️ UV: {uv[i]:.1f}\n")
-        msg += persian(f"   {weather_desc_persian(codes[i])}\n")
-        if sunrise[i] and sunset[i]:
+
+        # Temperature (use 0 if missing)
+        t_min = safe_float(min_t[i] if i < len(min_t) else None)
+        t_max = safe_float(max_t[i] if i < len(max_t) else None)
+        msg += persian(f"   🌡️ {t_min:.0f}–{t_max:.0f}°C\n")
+
+        # Feels like
+        if i < len(feels_max) and feels_max[i] is not None and feels_min[i] is not None:
+            f_min = safe_float(feels_min[i])
+            f_max = safe_float(feels_max[i])
+            msg += persian(f"   🤔 احساس: {f_min:.0f}–{f_max:.0f}°C\n")
+
+        # Precipitation
+        p = safe_float(precip[i] if i < len(precip) else None)
+        r = safe_float(rain[i] if i < len(rain) else None)
+        s = safe_float(snow[i] if i < len(snow) else None)
+        precip_line = persian(f"   🌧️ بارش: {p:.1f} mm")
+        if r > 0:
+            precip_line += persian(f" (باران {r:.1f} mm)")
+        if s > 0:
+            precip_line += persian(f" ❄️ برف {s:.1f} cm")
+        msg += precip_line + "\n"
+
+        # Wind
+        w = safe_float(wind[i] if i < len(wind) else None)
+        if w > 0:
+            msg += persian(f"   💨 باد: تا {w:.0f} km/h\n")
+
+        # UV index
+        u = safe_float(uv[i] if i < len(uv) else None)
+        if u > 0:
+            msg += persian(f"   ☀️ UV: {u:.1f}\n")
+
+        # Weather description
+        code = safe_int(codes[i] if i < len(codes) else None)
+        msg += persian(f"   {weather_desc_persian(code)}\n")
+
+        # Sunrise/Sunset
+        if i < len(sunrise) and sunrise[i] and i < len(sunset) and sunset[i]:
             sr = sunrise[i].split("T")[1][:5] if "T" in sunrise[i] else sunrise[i]
             ss = sunset[i].split("T")[1][:5] if "T" in sunset[i] else sunset[i]
             msg += persian(f"   🌅 طلوع {sr}  |  غروب {ss}\n")
+
         msg += "\n"
 
     msg += "─" * 30 + "\n"
