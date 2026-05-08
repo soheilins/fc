@@ -24,16 +24,16 @@ FORECAST_DAYS = 16
 BASE_API = f"https://botapi.rubika.ir/v3/{RUBIKA_TOKEN}"
 SEND_MESSAGE_URL = f"{BASE_API}/sendMessage"
 
-# ========== Persian text shaping (exactly like the PDF bot) ==========
+# ========== Persian text shaping ==========
 def reshape_persian(text):
-    """Reshape and apply bidi – same as used in your PDF generator."""
+    """Reshape and apply bidi, then force LTR override to prevent client reordering."""
     if not text:
         return text
     try:
         reshaped = arabic_reshaper.reshape(text)
         bidi_text = get_display(reshaped)
-        # Force visual order (prevent client re‑bidi) by wrapping with LTR embed
-        return "\u202A" + bidi_text + "\u202C"
+        # Left-to-Right Override (forces LTR, so the visually ordered string stays as is)
+        return "\u202D" + bidi_text + "\u202C"
     except:
         return text
 
@@ -46,7 +46,6 @@ MONTHS_PERSIAN = {
 def format_persian_date(date_str):
     try:
         dt = datetime.strptime(date_str, "%Y-%m-%d")
-        # Convert digits to Persian
         persian_digits = {'0':'۰','1':'۱','2':'۲','3':'۳','4':'۴','5':'۵','6':'۶','7':'۷','8':'۸','9':'۹'}
         day = ''.join(persian_digits.get(ch, ch) for ch in str(dt.day))
         year = ''.join(persian_digits.get(ch, ch) for ch in str(dt.year))
@@ -141,11 +140,13 @@ def build_message(forecast):
         u = safe_float(uv[i] if i < len(uv) else None)
         code = int(safe_float(codes[i] if i < len(codes) else None))
 
+        # Line 1: Date and temperatures
         line1 = f"📅 {date_persian}  |  🌡️ {t_min:.0f}–{t_max:.0f}°C"
         if f_max > 0 or f_min > 0:
             line1 += f"  (احساس {f_min:.0f}–{f_max:.0f}°C)"
         lines.append(line1)
 
+        # Line 2: Weather details
         details = []
         if p > 0:
             det = f"🌧️ {p:.1f} میلی‌متر"
@@ -164,12 +165,13 @@ def build_message(forecast):
             line2 += "  |  " + "  |  ".join(details)
         lines.append(line2)
 
+        # Sunrise/sunset
         if i < len(sunrise) and sunrise[i] and i < len(sunset) and sunset[i]:
             sr = sunrise[i].split("T")[1][:5] if "T" in sunrise[i] else sunrise[i]
             ss = sunset[i].split("T")[1][:5] if "T" in sunset[i] else sunset[i]
             lines.append(f"   🌅 طلوع {sr}  |  غروب {ss}")
 
-        lines.append("")  # empty line between days
+        lines.append("")  # blank line between days
 
     lines.append("─" * 30)
     lines.append("🌐 داده‌ها: Open‑Meteo")
@@ -177,7 +179,7 @@ def build_message(forecast):
     return "\n".join(lines)
 
 def send_rubika_message(chat_id, text):
-    """Send the (already reshaped) message to Rubika."""
+    """Send the (already reshaped & overridden) message."""
     payload = {"chat_id": chat_id, "text": text}
     try:
         resp = requests.post(SEND_MESSAGE_URL, json=payload, timeout=10)
@@ -193,7 +195,7 @@ def send_rubika_message(chat_id, text):
         print(f"❌ Exception: {e}", flush=True)
 
 def main():
-    print("🌤️ Weather bot (Persian text, LTR‑embedded)", flush=True)
+    print("🌤️ Weather bot (LTR Override method)", flush=True)
     start_time = time.time()
     max_runtime = 5.9 * 3600
     interval = 3600
@@ -206,7 +208,7 @@ def main():
         forecast = fetch_forecast()
         if forecast:
             raw_message = build_message(forecast)
-            reshaped_message = reshape_persian(raw_message)   # apply the same pipeline as PDF
+            reshaped_message = reshape_persian(raw_message)   # applies reshaping + LTR override
             for uid in RUBIKA_USER_IDS:
                 send_rubika_message(uid, reshaped_message)
         else:
