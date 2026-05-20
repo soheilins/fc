@@ -20,8 +20,8 @@ RUBIKA_USER_IDS = [
 
 LAT = 36.772269
 LON = 53.123903
-FORECAST_DAYS = 15          # fetch 15 days from API
-SHOW_DAYS = 7                # only use first 7 days for summary + hourly
+FORECAST_DAYS = 15
+SHOW_DAYS = 7
 
 BASE_API = f"https://botapi.rubika.ir/v3/{RUBIKA_TOKEN}"
 SEND_MESSAGE_URL = f"{BASE_API}/sendMessage"
@@ -81,9 +81,8 @@ def fetch_forecast():
             "sunrise", "sunset"
         ],
         "hourly": [
-            "temperature_2m", "precipitation", "precipitation_probability",
-            "windspeed_10m", "windgusts_10m", "relative_humidity_2m",
-            "pressure_msl", "cloud_cover", "visibility"
+            "temperature_2m", "precipitation", "precipitation_probability"
+            # windspeed_10m removed as requested
         ],
         "timezone": "Asia/Tehran",
         "forecast_days": FORECAST_DAYS
@@ -97,7 +96,10 @@ def fetch_forecast():
         return None
 
 def build_hourly_table(hourly_data, day_index, dates):
-    """Return a compact hourly table for one day (24 lines)."""
+    """
+    Build a formatted hourly table with columns:
+    ساعت | دما | بارش | احتمال بارش
+    """
     target_date = dates[day_index]
     times = hourly_data.get("time", [])
     start_idx = None
@@ -113,32 +115,25 @@ def build_hourly_table(hourly_data, day_index, dates):
     temp = hourly_data.get("temperature_2m", [])
     precip = hourly_data.get("precipitation", [])
     precip_prob = hourly_data.get("precipitation_probability", [])
-    wind = hourly_data.get("windspeed_10m", [])
-    windgust = hourly_data.get("windgusts_10m", [])
-    humidity = hourly_data.get("relative_humidity_2m", [])
-    pressure = hourly_data.get("pressure_msl", [])
-    cloud = hourly_data.get("cloud_cover", [])
-    visibility = hourly_data.get("visibility", [])
 
-    lines = ["🔽 پیش‌بینی ساعتی (ساعت|دما|بارش|احتمال|باد|تندباد|رطوبت|فشار|ابر|دید)"]
-    lines.append("--------------------------------------------------")
+    # Prepare lines
+    lines = []
+    # Column headers (with fixed widths for alignment)
+    header = f"{'ساعت':<6} {'دما':<4} {'بارش':<6} {'احتمال بارش':<10}"
+    lines.append("🔽 پیش‌بینی ساعتی")
+    lines.append(header)
+    lines.append("-" * 30)
     for i in range(start_idx, min(end_idx + 1, start_idx + 24)):
-        hour_str = times[i].split("T")[1][:5]
+        hour_str = times[i].split("T")[1][:5]  # HH:MM
         t = safe_float(temp[i] if i < len(temp) else None)
         p = safe_float(precip[i] if i < len(precip) else None)
         pp = safe_float(precip_prob[i] if i < len(precip_prob) else None)
-        w = safe_float(wind[i] if i < len(wind) else None)
-        wg = safe_float(windgust[i] if i < len(windgust) else None)
-        h = safe_float(humidity[i] if i < len(humidity) else None)
-        pr = safe_float(pressure[i] if i < len(pressure) else None)
-        c = safe_float(cloud[i] if i < len(cloud) else None)
-        vis = safe_float(visibility[i] if i < len(visibility) else None) / 1000  # m -> km
-        line = f"{hour_str}|{t:.0f}|{p:.1f}|{pp:.0f}%|{w:.0f}|{wg:.0f}|{h:.0f}|{pr:.0f}|{c:.0f}|{vis:.1f}"
+        # Format each row
+        line = f"{hour_str:<6} {t:>3.0f}°   {p:>4.1f}   {pp:>5.0f}%"
         lines.append(line)
     return "\n".join(lines)
 
 def build_daily_summary(day_data, date_str, sunrise, sunset, idx):
-    """Compact daily summary (no UV, no feels-like)."""
     jdate = gregorian_to_jalali(date_str)
     t_min = safe_float(day_data["min_t"])
     t_max = safe_float(day_data["max_t"])
@@ -174,11 +169,6 @@ def get_update_header():
     return f"پیش‌بینی {SHOW_DAYS} روزه هوای سوته\nبروزرسانی: {update_str_fa}\n{'='*40}"
 
 def split_forecast_messages(forecast):
-    """
-    Returns a list of messages:
-    1) Summary of first SHOW_DAYS days (daily aggregates, no hourly)
-    2) For each of those days, a separate message with hourly table (and day's date)
-    """
     if not forecast or "daily" not in forecast:
         return ["⚠️ اطلاعات آب و هوا در دسترس نیست."]
 
@@ -188,7 +178,6 @@ def split_forecast_messages(forecast):
     if not dates:
         return ["⚠️ داده‌ای یافت نشد."]
 
-    # Limit to SHOW_DAYS
     dates = dates[:SHOW_DAYS]
     max_t = daily.get("temperature_2m_max", [])[:SHOW_DAYS]
     min_t = daily.get("temperature_2m_min", [])[:SHOW_DAYS]
@@ -203,7 +192,7 @@ def split_forecast_messages(forecast):
     header = get_update_header()
     messages = []
 
-    # ---- 1) Summary message (all days, no hourly) ----
+    # Summary message for all SHOW_DAYS
     summary_lines = [header, "\n📋 خلاصه روزانه:"]
     for i in range(SHOW_DAYS):
         day_data = {
@@ -217,16 +206,20 @@ def split_forecast_messages(forecast):
         }
         daily_text = build_daily_summary(day_data, dates[i], sunrise, sunset, i)
         summary_lines.append(daily_text)
-        summary_lines.append("")  # separator
+        summary_lines.append("")
     messages.append("\n".join(summary_lines).strip())
 
-    # ---- 2) Separate hourly messages for each day ----
-    for i in range(SHOW_DAYS):
-        jdate = gregorian_to_jalali(dates[i])
-        hourly_title = f"{header}\n\n📅 {jdate} – داده ساعتی"
-        hourly_table = build_hourly_table(hourly, i, dates) if hourly else "⚠️ داده ساعتی در دسترس نیست"
-        msg = f"{hourly_title}\n\n{hourly_table}"
-        messages.append(msg.strip())
+    # Separate hourly message for each day (only if hourly data exists)
+    if hourly:
+        for i in range(SHOW_DAYS):
+            jdate = gregorian_to_jalali(dates[i])
+            hourly_title = f"{header}\n\n📅 {jdate} – داده ساعتی"
+            hourly_table = build_hourly_table(hourly, i, dates)
+            msg = f"{hourly_title}\n\n{hourly_table}"
+            messages.append(msg.strip())
+    else:
+        # If no hourly data, send a single error instead of 7 messages
+        messages.append("⚠️ داده ساعتی در پاسخ API وجود ندارد.")
 
     return messages
 
@@ -246,7 +239,7 @@ def send_rubika_message(chat_id, text):
         print(f"❌ Exception: {e}", flush=True)
 
 def main():
-    print(f"🌤️ Weather bot - Summary first, then hourly for {SHOW_DAYS} days", flush=True)
+    print(f"🌤️ Weather bot - Hourly without wind, with column headers", flush=True)
     start_time = time.time()
     max_runtime = 5.9 * 3600
     interval = 600
@@ -262,7 +255,7 @@ def main():
             for uid in RUBIKA_USER_IDS:
                 for msg in messages:
                     send_rubika_message(uid, msg)
-                    time.sleep(0.5)   # avoid flood
+                    time.sleep(0.5)
         else:
             error_msg = "⚠️ پیش‌بینی در دسترس نیست"
             for uid in RUBIKA_USER_IDS:
