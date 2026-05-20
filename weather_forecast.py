@@ -20,13 +20,13 @@ RUBIKA_USER_IDS = [
 
 LAT = 36.772269
 LON = 53.123903
-FORECAST_DAYS = 15
-SHOW_DAYS = 7
+FORECAST_DAYS = 15   # از API ۱۵ روز می‌گیریم
+SHOW_DAYS = 7        # فقط ۷ روز اول رو نشون می‌دیم
 
 BASE_API = f"https://botapi.rubika.ir/v3/{RUBIKA_TOKEN}"
 SEND_MESSAGE_URL = f"{BASE_API}/sendMessage"
 
-# ========== Helper functions ==========
+# ========== توابع کمکی ==========
 def gregorian_to_jalali(date_str):
     try:
         dt = datetime.strptime(date_str, "%Y-%m-%d")
@@ -70,6 +70,7 @@ def to_persian_digits(s):
     return ''.join(persian_digits.get(ch, ch) for ch in s)
 
 def fetch_forecast():
+    """دریافت پیش‌بینی روزانه و ساعتی از Open‑Meteo"""
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": LAT,
@@ -82,7 +83,6 @@ def fetch_forecast():
         ],
         "hourly": [
             "temperature_2m", "precipitation", "precipitation_probability"
-            # windspeed_10m removed as requested
         ],
         "timezone": "Asia/Tehran",
         "forecast_days": FORECAST_DAYS
@@ -97,8 +97,8 @@ def fetch_forecast():
 
 def build_hourly_table(hourly_data, day_index, dates):
     """
-    Build a formatted hourly table with columns:
-    ساعت | دما | بارش | احتمال بارش
+    ساخت متن ساعتی برای یک روز مشخص
+    هر ساعت در یک خط جداگانه با اعداد فارسی
     """
     target_date = dates[day_index]
     times = hourly_data.get("time", [])
@@ -116,24 +116,26 @@ def build_hourly_table(hourly_data, day_index, dates):
     precip = hourly_data.get("precipitation", [])
     precip_prob = hourly_data.get("precipitation_probability", [])
 
-    # Prepare lines
-    lines = []
-    # Column headers (with fixed widths for alignment)
-    header = f"{'ساعت':<6} {'دما':<4} {'بارش':<6} {'احتمال بارش':<10}"
-    lines.append("🔽 پیش‌بینی ساعتی")
-    lines.append(header)
-    lines.append("-" * 30)
+    lines = ["🔽 پیش‌بینی ساعتی:"]
     for i in range(start_idx, min(end_idx + 1, start_idx + 24)):
-        hour_str = times[i].split("T")[1][:5]  # HH:MM
+        hour_str = times[i].split("T")[1][:5]       # "05:30"
+        hour_fa = to_persian_digits(hour_str)       # "۰۵:۳۰"
         t = safe_float(temp[i] if i < len(temp) else None)
         p = safe_float(precip[i] if i < len(precip) else None)
         pp = safe_float(precip_prob[i] if i < len(precip_prob) else None)
-        # Format each row
-        line = f"{hour_str:<6} {t:>3.0f}°   {p:>4.1f}   {pp:>5.0f}%"
+
+        # تبدیل اعداد به فارسی
+        temp_fa = to_persian_digits(f"{t:.0f}")
+        precip_fa = to_persian_digits(f"{p:.1f}")
+        prob_fa = to_persian_digits(f"{pp:.0f}")
+
+        line = (f"{hour_fa} - دما {temp_fa}°، بارش {precip_fa} میلی‌متر، "
+                f"احتمال بارش {prob_fa}٪")
         lines.append(line)
     return "\n".join(lines)
 
 def build_daily_summary(day_data, date_str, sunrise, sunset, idx):
+    """خلاصه روزانه (بدون UV، بدون احساس گرما)"""
     jdate = gregorian_to_jalali(date_str)
     t_min = safe_float(day_data["min_t"])
     t_max = safe_float(day_data["max_t"])
@@ -162,6 +164,7 @@ def build_daily_summary(day_data, date_str, sunrise, sunset, idx):
     return "\n".join(lines)
 
 def get_update_header():
+    """تولید هدر با زمان بروزرسانی (تهران، اعداد فارسی)"""
     tehran_tz = ZoneInfo("Asia/Tehran")
     now_tehran = datetime.now(tehran_tz)
     update_str = now_tehran.strftime("%Y-%m-%d %H:%M:%S")
@@ -169,6 +172,11 @@ def get_update_header():
     return f"پیش‌بینی {SHOW_DAYS} روزه هوای سوته\nبروزرسانی: {update_str_fa}\n{'='*40}"
 
 def split_forecast_messages(forecast):
+    """
+    برگرداندن لیست پیام‌ها:
+    1) خلاصه ۷ روز اول
+    2) برای هر روز از ۷ روز، یک پیام جداگانه با داده ساعتی
+    """
     if not forecast or "daily" not in forecast:
         return ["⚠️ اطلاعات آب و هوا در دسترس نیست."]
 
@@ -178,6 +186,7 @@ def split_forecast_messages(forecast):
     if not dates:
         return ["⚠️ داده‌ای یافت نشد."]
 
+    # فقط SHOW_DAYS روز اول
     dates = dates[:SHOW_DAYS]
     max_t = daily.get("temperature_2m_max", [])[:SHOW_DAYS]
     min_t = daily.get("temperature_2m_min", [])[:SHOW_DAYS]
@@ -192,7 +201,7 @@ def split_forecast_messages(forecast):
     header = get_update_header()
     messages = []
 
-    # Summary message for all SHOW_DAYS
+    # ---- 1) پیام خلاصه روزانه (همه روزها) ----
     summary_lines = [header, "\n📋 خلاصه روزانه:"]
     for i in range(SHOW_DAYS):
         day_data = {
@@ -206,20 +215,16 @@ def split_forecast_messages(forecast):
         }
         daily_text = build_daily_summary(day_data, dates[i], sunrise, sunset, i)
         summary_lines.append(daily_text)
-        summary_lines.append("")
+        summary_lines.append("")   # خط خالی بین روزها
     messages.append("\n".join(summary_lines).strip())
 
-    # Separate hourly message for each day (only if hourly data exists)
-    if hourly:
-        for i in range(SHOW_DAYS):
-            jdate = gregorian_to_jalali(dates[i])
-            hourly_title = f"{header}\n\n📅 {jdate} – داده ساعتی"
-            hourly_table = build_hourly_table(hourly, i, dates)
-            msg = f"{hourly_title}\n\n{hourly_table}"
-            messages.append(msg.strip())
-    else:
-        # If no hourly data, send a single error instead of 7 messages
-        messages.append("⚠️ داده ساعتی در پاسخ API وجود ندارد.")
+    # ---- 2) برای هر روز یک پیام ساعتی جداگانه ----
+    for i in range(SHOW_DAYS):
+        jdate = gregorian_to_jalali(dates[i])
+        hourly_title = f"{header}\n\n📅 {jdate} – داده ساعتی"
+        hourly_table = build_hourly_table(hourly, i, dates) if hourly else "⚠️ داده ساعتی در دسترس نیست"
+        msg = f"{hourly_title}\n\n{hourly_table}"
+        messages.append(msg.strip())
 
     return messages
 
@@ -239,7 +244,7 @@ def send_rubika_message(chat_id, text):
         print(f"❌ Exception: {e}", flush=True)
 
 def main():
-    print(f"🌤️ Weather bot - Hourly without wind, with column headers", flush=True)
+    print(f"🌤️ Weather bot - Daily summary + hourly details for {SHOW_DAYS} days", flush=True)
     start_time = time.time()
     max_runtime = 5.9 * 3600
     interval = 600
@@ -255,7 +260,7 @@ def main():
             for uid in RUBIKA_USER_IDS:
                 for msg in messages:
                     send_rubika_message(uid, msg)
-                    time.sleep(0.5)
+                    time.sleep(0.5)   # جلوگیری از اسپم
         else:
             error_msg = "⚠️ پیش‌بینی در دسترس نیست"
             for uid in RUBIKA_USER_IDS:
